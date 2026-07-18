@@ -48,81 +48,7 @@ DB_Users = {"admin": {
         "hashed_password":"$argon2id$v=19$m=65536,t=3,p=4$M7VamS8pwGd4mwBCYA3loQ$fnL+VvEP6hE6sp/6gon2QmYQIWQhr3sJDQqe9WOWv5M"
     }}
 
-# def booking_get(id:int):
-#     booking = next((i for i in DB_Reservation_room if i["id"] == id),None)
-#     if booking is None:
-#         raise HTTPException(status_code=404,detail="not found")
-#     return booking
 
-# @router.post("/booking/",response_model=BookingResponse,summary="создать запись",
-#           status_code=201,
-#           description="создание записи бронирования и присваевания этой записи уникального id")
-# def reservation_creation(create_reservat:BookingCreate):
-#      existing_booking = next((i for i in DB_Reservation_room if i["room_name"] == create_reservat.room_name and i["date"] == create_reservat.date),None)
-#      if existing_booking is not None:
-#         raise HTTPException(status_code=409,detail="Комната или дата на этот день заняты!")
-#      reservat_dict = create_reservat.model_dump()
-#      id = len(DB_Reservation_room)+1
-#      reservat_dict["id"] = id
-#      DB_Reservation_room.append(reservat_dict)
-#      return reservat_dict
-
-# @router.get("/booking/search",response_model=list[BookingResponse])
-# def booking_search_filter(filter:Annotated[SearchByFilter,Depends()]):
-#     res = []
-#     for booking in DB_Reservation_room:
-#         if filter.user_name and filter.user_name.lower() not in booking["user_name"].lower():
-#             continue
-#         if filter.room_name and filter.room_name.lower() not in booking["room_name"].lower():
-#             continue
-#         res.append(booking)
-#     return res
-
-#@router.get("/booking/{id}",response_model=BookingResponse,
-#         summary="найти запись по id"
-#         ,status_code=200,
-#        
-#         description="нахождение в базе записи по уникальному id")
-#def searc_booking_id(bokin=Depends(booking_get)):
-#    return bokin
-    
-
-# @router.get("/booking/",response_model=list[BookingResponse]
-#          ,summary="показать все запси booking"
-#         ,
-#         description="просмотр всех существующих записей")
-# def bookings_all():
-#     return DB_Reservation_room
-
-
-# @router.delete("/booking/{id}",summary="удаление записи по id",
-            
-#             description="удаление записи по уникальному id если эта запись вообще есть в базе")
-# def delete_booking(bokin=Depends(booking_get)):
-#     DB_Reservation_room.remove(bokin)
-#     return {"status":"delete"}
-
-# @router.put("/booking/{id}",response_model=BookingResponse)
-# def put_booking(new_data:BookingPut,booking=Depends(booking_get)):
-#    new_data_dict = new_data.model_dump()
-#    new_data_dict["id"] = booking["id"]
-#    booking.update(new_data_dict)
-#    return booking
-
-
-# @router.patch("/booking/{id}",response_model=BookingResponse)
-# def patch_booking(new_data:BookingPatch,booking=Depends(booking_get)):
-#     new_data_dict = new_data.model_dump(exclude_unset=True)
-#     booking.update(new_data_dict)
-#     return booking
-
-# @router.patch("/bookig/{id}/status",response_model=BookingResponse)
-# def patch_booking_status(status:StatusPatch,booking=Depends(booking_get)):
-#     data_dict = status.model_dump()
-#     if booking["status"] == "cancelled":
-#         raise HTTPException(status_code=400,detail="Changes are not allowed")
-#     booking.update(data_dict)
-#     return booking
 
 def get_user_in_db(db,username):
     if username in db:
@@ -244,17 +170,7 @@ def delete_booking_id(user:Annotated[User,Depends(get_current_user)],
         DB_Reservation_room.remove(booking)
         return {"status":"delete"}
     
-    # for i in DB_Reservation_room:
-    #     if i["id"] == id_booking:
-    #         if i["owner"] != user.username:
-    #              raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
-    #                         detail="Access is denied")
-    #         else:
-    #             DB_Reservation_room.remove(i)
-    #             return {"status":"delete"}
-    # else:
-    #     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
-    #                         detail=f"not found {id_booking}")
+    
     
 @router.get("/booking/{id_booking}")
 def get_booking_id(user:Annotated[User,Depends(get_current_user)],
