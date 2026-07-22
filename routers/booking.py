@@ -12,6 +12,9 @@ from jwt.exceptions import InvalidTokenError
 from pwdlib import PasswordHash
 import os
 from dotenv import load_dotenv
+from database import get_db
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import text
 from schemas.booking import (
     BookingCreate,
     BookingResponse,
@@ -48,7 +51,36 @@ DB_Users = {"admin": {
         "hashed_password":"$argon2id$v=19$m=65536,t=3,p=4$M7VamS8pwGd4mwBCYA3loQ$fnL+VvEP6hE6sp/6gon2QmYQIWQhr3sJDQqe9WOWv5M"
     }}
 
+@router.get("/test")
+async def get_users(db:AsyncSession = Depends(get_db)):
+    res = await db.execute(text(
+        """SELECT*
+            FROM users"""
+    )
+    )
+    return res.mappings().all()
 
+@router.post("/registration")
+async def registration(db:AsyncSession=Depends(get_db),user:CreateUser=Depends()):
+    passwordhash = password_hash.hash(user.password)
+    await db.execute(text("""
+                            INSERT INTO users(username,email,hashed_password)
+                            VALUES(:username,:email,:hashed_password)"""),
+                            {"username":user.username,"email":user.email,"hashed_password":passwordhash})
+    await db.commit()
+    return {"message":"You have registered"}
+
+# @router.post("/registration")
+# def registration(user:CreateUser=Depends()):
+#     passwordhash = password_hash.hash(user.password)
+#     default_role = "user"
+#     if user.username in DB_Users:
+#         raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+#                             detail=f"A user with the nickname {user.username} already exists in the system.")
+    
+#     DB_Users.update({user.username:{"username":user.username,"role":default_role,
+#                "hashed_password":passwordhash}})
+#     return {"message":"You have registered"}
 
 def get_user_in_db(db,username):
     if username in db:
@@ -122,17 +154,7 @@ def log_in_token(token:Annotated[OAuth2PasswordRequestForm,Depends()]):
 def users_me_get(user:Annotated[User,Depends(get_current_user)]):
     return user
 
-@router.post("/registration")
-def registration(user:CreateUser=Depends()):
-    passwordhash = password_hash.hash(user.password)
-    default_role = "user"
-    if user.username in DB_Users:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
-                            detail=f"A user with the nickname {user.username} already exists in the system.")
-    
-    DB_Users.update({user.username:{"username":user.username,"role":default_role,
-               "hashed_password":passwordhash}})
-    return {"message":"You have registered"}
+
 
 @router.post("/booking/hotel")
 def booking_hotel(user:Annotated[User,Depends(get_current_user)],hotel:BookingCreateHostel):

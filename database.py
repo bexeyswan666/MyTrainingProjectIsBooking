@@ -9,14 +9,17 @@ class Setting(BaseSettings):
     DB_PORT:int
     DB_NAME:str
 
-    def DATABASE_ULR(self)->str:
+    SECRET_KEY:str
+    ALGORITHM:str
+
+    def DATABASE_URL(self)->str:
         return f"postgresql+asyncpg://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
     
     model_config = SettingsConfigDict(env_file=".env")
 
 setting = Setting()
 
-engine = create_async_engine(setting.DATABASE_ULR,echo = True)
+engine = create_async_engine(setting.DATABASE_URL(),echo = True)
 
 async_session = async_sessionmaker(
     bind=engine,
