@@ -54,6 +54,7 @@ class Token(BaseModel):
 
 class TokenData(BaseModel):
     username:str
+    
 
 class BookingCreateHostel(BaseModel):
     hotel_name:str

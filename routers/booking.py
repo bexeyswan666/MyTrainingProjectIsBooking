@@ -62,11 +62,15 @@ async def get_users(db:AsyncSession = Depends(get_db)):
 
 @router.post("/registration")
 async def registration(db:AsyncSession=Depends(get_db),user:CreateUser=Depends()):
-    passwordhash = password_hash.hash(user.password)
+    hashed_password= password_hash.hash(user.password)
+    username_ver = await db.execute(text("SELECT username FROM users WHERE username =:username OR email= :email"),{"username":user.username,"email":user.email})
+    if username_ver.fetchall():
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                            detail="Username or email is already in use.") 
     await db.execute(text("""
                             INSERT INTO users(username,email,hashed_password)
                             VALUES(:username,:email,:hashed_password)"""),
-                            {"username":user.username,"email":user.email,"hashed_password":passwordhash})
+                            {"username":user.username,"email":user.email,"hashed_password":hashed_password})
     await db.commit()
     return {"message":"You have registered"}
 
@@ -82,35 +86,48 @@ async def registration(db:AsyncSession=Depends(get_db),user:CreateUser=Depends()
 #                "hashed_password":passwordhash}})
 #     return {"message":"You have registered"}
 
-def get_user_in_db(db,username):
-    if username in db:
-        user = db[username]
-        return UserInDb(**user)
+async def get_user_in_db(username,db):
+    res = await db.execute(text("""SELECT * FROM users WHERE username =:username"""),{"username":username})
+    user = res.mappings().first()
+    if user:
+        return user
+
     
 def verify_user(password,hashed_password):
     return password_hash.verify(password,hashed_password)
 
-def authenticate_user(username,db,password):
-    user = get_user_in_db(db,username)
+async def authenticate_user(username,db,password):
+    user = await get_user_in_db(username,db)
     if not user:
-        print("не нашли в бд")
         return False
     if not verify_user(password,user.hashed_password):
-        print("не прошли верификацию")
         return False
     return user
 
 def create_token(data:dict,expire_delta:timedelta):
     data_copy = data.copy()
     if expire_delta:
-        expt = datetime.now(timezone.utc)+expire_delta
+        expt =  datetime.now(timezone.utc)+expire_delta
     else:
         expt = datetime.now(timezone.utc)+timedelta(minutes=30)
     data_copy.update({"exp":expt})
     jwt_encode = jwt.encode(data_copy,SECRET_KEY,algorithm=ALGORITHM)
     return jwt_encode
 
-def get_current_user(token:Annotated[str,Depends(oauth2_sheme)]):
+
+@router.post("/token")
+async def log_in_token(token:Annotated[OAuth2PasswordRequestForm,Depends()],db:AsyncSession=Depends(get_db)):
+    user = await authenticate_user(token.username,db,token.password)
+    if not user :
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
+                            detail="invalid username or password",
+                            headers={"WWW-Authenticate":"bearer"})
+    access_token_expt = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_token(data={"sub":user.username,"role":user.role},expire_delta=access_token_expt)
+    return Token(access_token=access_token,token_type="Bearer")
+
+async def get_current_user(token:Annotated[str,Depends(oauth2_sheme)],
+                           db:AsyncSession=Depends(get_db)):
     exception = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
                             detail="Coild not validate crenditales",
                             headers={"WWW-Authenticate":"bearer"})
@@ -120,12 +137,26 @@ def get_current_user(token:Annotated[str,Depends(oauth2_sheme)]):
         if username is None:
             raise exception
         token_data = TokenData(username=username)
+        
     except InvalidTokenError:
         raise exception
-    user = get_user_in_db(DB_Users,token_data.username)
+    user = await get_user_in_db(token_data.username,db)
     if user is None:
         raise exception
     return user
+
+@router.get("/users/me",response_model=User)
+def users_me_get(user:Annotated[User,Depends(get_current_user)]):
+    return user
+
+
+
+@router.post("/booking/hotel")
+def booking_hotel(user:Annotated[User,Depends(get_current_user)],hotel:BookingCreateHostel):
+    booking_id = len(DB_Reservation_room)+1
+    result = {"id":booking_id,"hotel_name":hotel.hotel_name,"owner":user.username}
+    DB_Reservation_room.append(result)
+    return result 
 
 def get_current_admin(user:Annotated[User,Depends(get_current_user)]):
     if user.role != "admin":
@@ -140,29 +171,6 @@ def get_booking(id_booking:int):
                             detail=f"not found {id_booking}")
     return booking
  
-@router.post("/token")
-def log_in_token(token:Annotated[OAuth2PasswordRequestForm,Depends()]):
-    user = authenticate_user(token.username,DB_Users,token.password)
-    if not user :
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
-                            detail="invalid username or password",
-                            headers={"WWW-Authenticate":"bearer"})
-    access_token_expt = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_token(data={"sub":user.username,"role":user.role},expire_delta=access_token_expt)
-    return Token(access_token=access_token,token_type="bearer")
-@router.get("/users/me")
-def users_me_get(user:Annotated[User,Depends(get_current_user)]):
-    return user
-
-
-
-@router.post("/booking/hotel")
-def booking_hotel(user:Annotated[User,Depends(get_current_user)],hotel:BookingCreateHostel):
-    booking_id = len(DB_Reservation_room)+1
-    result = {"id":booking_id,"hotel_name":hotel.hotel_name,"owner":user.username}
-    DB_Reservation_room.append(result)
-    return result 
-
 @router.get("/my/booking")
 def bookig_hotel(user:Annotated[User,Depends(get_current_user)]):
     res = []
