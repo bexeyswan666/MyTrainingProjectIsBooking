@@ -59,8 +59,13 @@ class TokenData(BaseModel):
 class BookingCreateHostel(BaseModel):
     hotel_name:str
 
+class UserResponse(BaseModel):
+    username:str
+    email:EmailStr
+    role:str
+
 class User(BaseModel):
-    user_id:int
+    id:int
     username:str
     email:EmailStr
     role:str|None=None
@@ -82,9 +87,11 @@ class BookingRoom(BaseModel):
     count_people:int
 
 class Booking(BaseModel):
-    id:int
-    user_id:int
     room_id:int
     date_from:date
     date_to:date
+
+class BookingInDb(Booking):
+    id:int
+    user_id:int
     status:OptionsStatus

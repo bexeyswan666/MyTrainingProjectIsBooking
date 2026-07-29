@@ -19,6 +19,7 @@ from schemas.booking import (
     BookingCreate,
     BookingResponse,
     BookingPatch,
+    Booking,
     BookingPut,
     SearchByFilter,
     StatusPatch,
@@ -28,6 +29,7 @@ from schemas.booking import (
     Token,
     TokenData,
     BookingCreateHostel,
+    UserResponse,
 )
 router = APIRouter()
 
@@ -60,11 +62,16 @@ async def get_users(db:AsyncSession = Depends(get_db)):
     )
     return res.mappings().all()
 
+@router.get("/booking/roomtext")
+async def booking_all(db:AsyncSession=Depends(get_db)):
+    res = await db.execute(text("""SELECT * FROM bookings"""))
+    return res.mappings().all()
+
 @router.post("/registration")
 async def registration(db:AsyncSession=Depends(get_db),user:CreateUser=Depends()):
     hashed_password= password_hash.hash(user.password)
     username_ver = await db.execute(text("SELECT username FROM users WHERE username =:username OR email= :email"),{"username":user.username,"email":user.email})
-    if username_ver.fetchall():
+    if username_ver.first():
         raise HTTPException(status_code=status.HTTP_409_CONFLICT,
                             detail="Username or email is already in use.") 
     await db.execute(text("""
@@ -73,18 +80,6 @@ async def registration(db:AsyncSession=Depends(get_db),user:CreateUser=Depends()
                             {"username":user.username,"email":user.email,"hashed_password":hashed_password})
     await db.commit()
     return {"message":"You have registered"}
-
-# @router.post("/registration")
-# def registration(user:CreateUser=Depends()):
-#     passwordhash = password_hash.hash(user.password)
-#     default_role = "user"
-#     if user.username in DB_Users:
-#         raise HTTPException(status_code=status.HTTP_409_CONFLICT,
-#                             detail=f"A user with the nickname {user.username} already exists in the system.")
-    
-#     DB_Users.update({user.username:{"username":user.username,"role":default_role,
-#                "hashed_password":passwordhash}})
-#     return {"message":"You have registered"}
 
 async def get_user_in_db(username,db):
     res = await db.execute(text("""SELECT * FROM users WHERE username =:username"""),{"username":username})
@@ -145,10 +140,23 @@ async def get_current_user(token:Annotated[str,Depends(oauth2_sheme)],
         raise exception
     return user
 
-@router.get("/users/me",response_model=User)
+@router.get("/users/me",response_model=UserResponse)
 def users_me_get(user:Annotated[User,Depends(get_current_user)]):
     return user
 
+@router.post("/booking/{room_id}")
+async def booking_hotel1(room_id:Annotated[int,Path()],
+                         user:Annotated[User,Depends(get_current_user)],
+                         booking:Booking=Depends(),
+                         db:AsyncSession=Depends(get_db)):
+    await get_room_by_id(room_id,db)
+    await db.execute(text("""INSERT INTO bookings(user_id,room_id,status,date_from,date_to)
+                             VALUES (:user_id,:room_id,'confirmed',:date_from,:date_to)"""),
+                             {"room_id":room_id,"user_id":user.id,
+                            "date_to":booking.date_to,"date_from":booking.date_from})
+    await db.commit()
+    return {"status":"create booking!"}
+    
 
 
 @router.post("/booking/hotel")
@@ -156,7 +164,22 @@ def booking_hotel(user:Annotated[User,Depends(get_current_user)],hotel:BookingCr
     booking_id = len(DB_Reservation_room)+1
     result = {"id":booking_id,"hotel_name":hotel.hotel_name,"owner":user.username}
     DB_Reservation_room.append(result)
-    return result 
+    return result
+
+async def get_room_by_id(room_id:int,db:AsyncSession):
+    room = await db.execute(text(
+            """SELECT * FROM rooms WHERE id =:room_id"""
+    ),{"room_id":room_id})
+    res_room = room.mappings().first()
+    if res_room:
+        return res_room
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                        detail="Not found")
+
+@router.get("/booking/room/{room_id}")
+async def bookint_room_id(room_id:Annotated[int,Path()],db:AsyncSession=Depends(get_db)):
+    room = await get_room_by_id(room_id,db)
+    return room
 
 def get_current_admin(user:Annotated[User,Depends(get_current_user)]):
     if user.role != "admin":
