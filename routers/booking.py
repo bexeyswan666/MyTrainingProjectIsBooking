@@ -15,21 +15,17 @@ from dotenv import load_dotenv
 from database import get_db
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
+from datetime import date
 from schemas.booking import (
-    BookingCreate,
     BookingResponse,
-    BookingPatch,
     Booking,
-    BookingPut,
-    SearchByFilter,
-    StatusPatch,
     CreateUser,
     User,
     UserInDb,
     Token,
     TokenData,
-    BookingCreateHostel,
     UserResponse,
+    OptionsStatus,
 )
 router = APIRouter()
 
@@ -45,32 +41,11 @@ password_hash = PasswordHash.recommended()
 DUMMI_HASH = password_hash.hash("dummypassword")
 oauth2_sheme = OAuth2PasswordBearer(tokenUrl="token")
 
-DB_Reservation_room = []
-
-DB_Users = {"admin": {
-        "username": "admin",
-        "role":"admin",
-        "hashed_password":"$argon2id$v=19$m=65536,t=3,p=4$M7VamS8pwGd4mwBCYA3loQ$fnL+VvEP6hE6sp/6gon2QmYQIWQhr3sJDQqe9WOWv5M"
-    }}
-
-@router.get("/test")
-async def get_users(db:AsyncSession = Depends(get_db)):
-    res = await db.execute(text(
-        """SELECT*
-            FROM users"""
-    )
-    )
-    return res.mappings().all()
-
-@router.get("/booking/roomtext")
-async def booking_all(db:AsyncSession=Depends(get_db)):
-    res = await db.execute(text("""SELECT * FROM bookings"""))
-    return res.mappings().all()
-
 @router.post("/registration")
 async def registration(db:AsyncSession=Depends(get_db),user:CreateUser=Depends()):
     hashed_password= password_hash.hash(user.password)
-    username_ver = await db.execute(text("SELECT username FROM users WHERE username =:username OR email= :email"),{"username":user.username,"email":user.email})
+    username_ver = await db.execute(text("SELECT username FROM users WHERE username =:username OR email= :email"),
+                                    {"username":user.username,"email":user.email})
     if username_ver.first():
         raise HTTPException(status_code=status.HTTP_409_CONFLICT,
                             detail="Username or email is already in use.") 
@@ -82,7 +57,8 @@ async def registration(db:AsyncSession=Depends(get_db),user:CreateUser=Depends()
     return {"message":"You have registered"}
 
 async def get_user_in_db(username,db):
-    res = await db.execute(text("""SELECT * FROM users WHERE username =:username"""),{"username":username})
+    res = await db.execute(text("""SELECT * FROM users WHERE username =:username"""),
+                           {"username":username})
     user = res.mappings().first()
     if user:
         return user
@@ -111,7 +87,8 @@ def create_token(data:dict,expire_delta:timedelta):
 
 
 @router.post("/token")
-async def log_in_token(token:Annotated[OAuth2PasswordRequestForm,Depends()],db:AsyncSession=Depends(get_db)):
+async def log_in_token(token:Annotated[OAuth2PasswordRequestForm,Depends()],
+                       db:AsyncSession=Depends(get_db)):
     user = await authenticate_user(token.username,db,token.password)
     if not user :
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
@@ -140,15 +117,54 @@ async def get_current_user(token:Annotated[str,Depends(oauth2_sheme)],
         raise exception
     return user
 
+def get_current_admin(user:Annotated[User,Depends(get_current_user)]):
+    if user.role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail="Access is denied")
+    return user
+
+
+@router.get("/user/test",dependencies=[Depends(get_current_admin)])
+async def get_users(db:AsyncSession = Depends(get_db)):
+    res = await db.execute(text(
+        """SELECT*
+            FROM users"""
+    )
+    )
+    return res.mappings().all()
+
+@router.get("/booking/test",dependencies=[Depends(get_current_admin)])
+async def booking_all(db:AsyncSession=Depends(get_db)):
+    res = await db.execute(text("""SELECT * FROM bookings"""))
+    return res.mappings().all()
+
 @router.get("/users/me",response_model=UserResponse)
 def users_me_get(user:Annotated[User,Depends(get_current_user)]):
     return user
 
+@router.get("/booking/my",response_model=list[BookingResponse])
+async def booking_all(user:Annotated[User,Depends(get_current_user)],
+                      db:AsyncSession=Depends(get_db)):
+    res = await db.execute(text("""SELECT * FROM bookings WHERE user_id = :user_id"""),{"user_id":user.id})
+    result = res.mappings().all()
+    return result
+
+@router.get("/hotels")
+async def get_hotels(db:AsyncSession=Depends(get_db)):
+    res = await db.execute(text("""SELECT * FROM hotels"""))
+    return res.mappings().all()
+
 @router.post("/booking/{room_id}")
-async def booking_hotel1(room_id:Annotated[int,Path()],
+async def booking_create(room_id:Annotated[int,Path()],
                          user:Annotated[User,Depends(get_current_user)],
                          booking:Booking=Depends(),
                          db:AsyncSession=Depends(get_db)):
+    if booking.date_from >= booking.date_to:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="date_to must be after date_from")
+    if booking.date_from<date.today():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="date_from cannot be in the past")
     await get_room_by_id(room_id,db)
     await db.execute(text("""INSERT INTO bookings(user_id,room_id,status,date_from,date_to)
                              VALUES (:user_id,:room_id,'confirmed',:date_from,:date_to)"""),
@@ -156,17 +172,11 @@ async def booking_hotel1(room_id:Annotated[int,Path()],
                             "date_to":booking.date_to,"date_from":booking.date_from})
     await db.commit()
     return {"status":"create booking!"}
+        
+     
     
-
-
-@router.post("/booking/hotel")
-def booking_hotel(user:Annotated[User,Depends(get_current_user)],hotel:BookingCreateHostel):
-    booking_id = len(DB_Reservation_room)+1
-    result = {"id":booking_id,"hotel_name":hotel.hotel_name,"owner":user.username}
-    DB_Reservation_room.append(result)
-    return result
-
-async def get_room_by_id(room_id:int,db:AsyncSession):
+async def get_room_by_id(room_id:int,
+                         db:AsyncSession):
     room = await db.execute(text(
             """SELECT * FROM rooms WHERE id =:room_id"""
     ),{"room_id":room_id})
@@ -181,68 +191,51 @@ async def bookint_room_id(room_id:Annotated[int,Path()],db:AsyncSession=Depends(
     room = await get_room_by_id(room_id,db)
     return room
 
-def get_current_admin(user:Annotated[User,Depends(get_current_user)]):
-    if user.role != "admin":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
-                            detail="Access is denied")
-    return user
-
-def get_booking(id_booking:int):
-    booking = next((i for i in DB_Reservation_room if i["id"] == id_booking),None)
-    if not booking:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
-                            detail=f"not found {id_booking}")
-    return booking
- 
-@router.get("/my/booking")
-def bookig_hotel(user:Annotated[User,Depends(get_current_user)]):
-    res = []
-    for i in DB_Reservation_room:
-        if i["owner"] == user.username:
-            res.append(i)
-    return res    
-
-@router.get("/booking/all",dependencies=[Depends(get_current_admin)])
-def booking_all(owner:Annotated[str|None,Query()]=None,hotel_name:Annotated[str|None,Query()]=None):
-    result = []
-    for i in DB_Reservation_room:
-        if owner is not None and owner.lower() not in i["owner"].lower():
-            continue
-        if hotel_name is not None and hotel_name.lower() not in i["hotel_name"].lower():
-            continue
-        result.append(i)
+async def get_booking_by_id(user,
+                            id_booking,
+                            db):
+    res = await db.execute(text("""SELECT * FROM bookings WHERE bookings.id = :id_booking AND user_id = :user_id"""),
+                           {"id_booking":id_booking,"user_id":user.id})
+    result = res.mappings().first()
+    if not result:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     return result
 
-@router.delete("/booking/{id_booking}")
-def delete_booking_id(user:Annotated[User,Depends(get_current_user)],
-                      booking=Depends(get_booking)):
-    if booking["owner"] != user.username:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
-                            detail="Access is denied")
-    else:
-        DB_Reservation_room.remove(booking)
-        return {"status":"delete"}
-    
-    
-    
-@router.get("/booking/{id_booking}")
-def get_booking_id(user:Annotated[User,Depends(get_current_user)],
-                   booking=Depends(get_booking)):
-    if booking["owner"] != user.username:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
-                            detail="Access is denied")
+@router.get("/booking/{id_booking}",response_model=BookingResponse)
+async def my_booking(user:Annotated[User,Depends(get_current_user)],
+                     id_booking:int,db:AsyncSession=Depends(get_db)):
+    booking = await get_booking_by_id(user,id_booking,db)
     return booking
 
-@router.patch("/booking/{id_booking}")
-def patch_booking_id(new_data:BookingPatch,user:Annotated[User,Depends(get_current_user)],booking=Depends(get_booking)):
-    if booking["owner"] != user.username:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
-                            detail="Access is denied")
-    new_data_dict = new_data.model_dump(exclude_unset=True)
-    booking.update(new_data_dict)
-    return booking
-    
+@router.delete("/booking/{id_booking}",dependencies=[Depends(get_current_admin)])
+async def delete_booking(id_booking:Annotated[int,Path()],
+                         user:Annotated[User,Depends(get_current_user)],
+                         db:AsyncSession=Depends(get_db)):
+    await get_booking_by_id(user,id_booking,db)
+    await db.execute(text("""DELETE FROM bookings WHERE id = :id_booking"""),{"id_booking":id_booking})
+    await db.commit()
+    return {"status":"delete"}
+
+@router.patch("/bookind/status/{id_bookind}",dependencies=[Depends(get_current_admin)])
+async def patch_status_by_id(status:OptionsStatus,id_bookind:Annotated[int,Path()],
+                             user:Annotated[User,Depends(get_current_user)],
+                             db:AsyncSession=Depends(get_db)):
+    await get_booking_by_id(user,id_bookind,db)
+    await db.execute(text("""UPDATE bookings SET "status" = :status WHERE id = :id_booking"""),
+                     {"status":status,"id_booking":id_bookind})
+    await db.commit()
+    return {"status":"update"}
+
+@router.patch("/booking/{id_booking}/cancel")
+async def patch_booking_cancel(id_booking:Annotated[int,Path()],
+                               user:Annotated[User,Depends(get_current_user)],
+                               db:AsyncSession=Depends(get_db)):
+    await get_booking_by_id(user,id_booking,db)
+    await db.execute(text("""UPDATE bookings SET "status" = 'cancelled' WHERE id = :id_booking"""),
+                     {"id_booking":id_booking})
+    await db.commit()
+    return {"ststus":"Update!"}
+
     
 
 
-    

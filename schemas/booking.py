@@ -2,13 +2,14 @@ from pydantic import BaseModel,Field
 from datetime import date 
 from enum import Enum
 from pydantic import EmailStr
+
+
 class BookingResponse(BaseModel):
     id:int
-    user_name:str=Field(min_length = 2 ,max_length = 50)
-    room_name:str
-    date:date
-    status:str
-
+    room_id:int
+    date_from:date
+    date_to:date
+    
 class BookingCreate(BaseModel):
     user_name:str = Field(min_length = 2 , max_length = 50)
     room_name:str
