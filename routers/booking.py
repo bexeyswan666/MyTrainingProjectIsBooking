@@ -135,7 +135,12 @@ async def get_users(db:AsyncSession = Depends(get_db)):
 
 @router.get("/booking/test",dependencies=[Depends(get_current_admin)])
 async def booking_all(db:AsyncSession=Depends(get_db)):
-    res = await db.execute(text("""SELECT * FROM bookings"""))
+    res = await db.execute(text("""SELECT bookings.id,bookings."status",bookings.date_from,bookings.date_to,users.username,
+                                       users.email,rooms.name AS room_name,hotels.name AS hotel_name,hotels.city
+                                       FROM bookings 
+                                       JOIN rooms ON (bookings.room_id = rooms.id)
+                                       JOIN hotels ON (rooms.hotel_id = hotels.id)
+                                       JOIN users ON (bookings.user_id = users.id)"""))
     return res.mappings().all()
 
 @router.get("/users/me",response_model=UserResponse)
@@ -145,7 +150,13 @@ def users_me_get(user:Annotated[User,Depends(get_current_user)]):
 @router.get("/booking/my",response_model=list[BookingResponse])
 async def booking_all(user:Annotated[User,Depends(get_current_user)],
                       db:AsyncSession=Depends(get_db)):
-    res = await db.execute(text("""SELECT * FROM bookings WHERE user_id = :user_id"""),{"user_id":user.id})
+    res = await db.execute(text("""SELECT bookings.id,bookings."status",bookings.date_from,bookings.date_to,
+                                   rooms.name AS room_name,hotels.name AS hotel_name,hotels.city
+                                   FROM bookings 
+                                   JOIN rooms ON (bookings.room_id = rooms.id)
+                                   JOIN hotels ON (rooms.hotel_id = hotels.id)
+                                   JOIN users ON (bookings.user_id = users.id)
+                                   WHERE user_id = :user_id"""),{"user_id":user.id})
     result = res.mappings().all()
     return result
 
@@ -166,14 +177,26 @@ async def booking_create(room_id:Annotated[int,Path()],
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail="date_from cannot be in the past")
     await get_room_by_id(room_id,db)
+    await date_check(room_id,booking.date_from,booking.date_to,db)
     await db.execute(text("""INSERT INTO bookings(user_id,room_id,status,date_from,date_to)
                              VALUES (:user_id,:room_id,'confirmed',:date_from,:date_to)"""),
                              {"room_id":room_id,"user_id":user.id,
                             "date_to":booking.date_to,"date_from":booking.date_from})
     await db.commit()
     return {"status":"create booking!"}
-        
-     
+
+# date_to новым днем можно считать только следующий день от конца бронирования
+async def date_check(room_id:int,date_from:date,date_to:date,db:AsyncSession):
+    res = await db.execute(text("""SELECT * FROM bookings 
+                                    WHERE bookings.room_id = :room_id AND 
+                                    bookings.date_from < :date_to AND
+                                    bookings.date_to >= :date_from AND
+                                    "status" = 'confirmed'"""),
+                                    {"date_to":date_to,"date_from":date_from,"room_id":room_id}) 
+    result = res.mappings().first()
+    if result:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                             detail="The reservation for this date is already taken")
     
 async def get_room_by_id(room_id:int,
                          db:AsyncSession):
@@ -186,19 +209,58 @@ async def get_room_by_id(room_id:int,
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
                         detail="Not found")
 
-@router.get("/booking/room/{room_id}")
+@router.get("/booking/rooms/{room_id}")
 async def bookint_room_id(room_id:Annotated[int,Path()],db:AsyncSession=Depends(get_db)):
     room = await get_room_by_id(room_id,db)
     return room
 
-async def get_booking_by_id(user,
+@router.get("/rooms/{room_id}")
+async def booking_room(room_id:Annotated[int,Path()],db:AsyncSession=Depends(get_db)):
+    res = await db.execute(text("""SELECT rooms.name as rooms_name,hotels.name as hotels_name,hotels.city
+                                    FROM rooms
+                                    JOIN hotels ON (rooms.hotel_id = hotels.id)
+                                    WHERE rooms.id = :room_id"""),{"room_id":room_id})
+    result = res.mappings().first()
+    if result:
+        return result
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                        detail="Not found")
+
+
+async def get_booking_by_id(user:User,
                             id_booking,
-                            db):
-    res = await db.execute(text("""SELECT * FROM bookings WHERE bookings.id = :id_booking AND user_id = :user_id"""),
+                            db:AsyncSession):
+    if user.role == "admin":
+        res = await db.execute(text("""SELECT bookings.id,bookings."status",bookings.date_from,bookings.date_to,users.username,
+                                       users.email,rooms.name AS room_name,hotels.name AS hotel_name,hotels.city
+                                       FROM bookings 
+                                       JOIN rooms ON (bookings.room_id = rooms.id)
+                                       JOIN hotels ON (rooms.hotel_id = hotels.id)
+                                       JOIN users ON (bookings.user_id = users.id)
+                                       WHERE bookings.id =:id_booking"""),
+                                       {"id_booking":id_booking})
+    else:
+        res = await db.execute(text("""SELECT bookings.id,bookings."status",bookings.date_from,bookings.date_to,
+                                       rooms.name AS room_name,hotels.name AS hotel_name,hotels.city
+                                       FROM bookings 
+                                       JOIN rooms ON (bookings.room_id = rooms.id)
+                                       JOIN hotels ON (rooms.hotel_id = hotels.id)
+                                       JOIN users ON (bookings.user_id = users.id)
+                                       WHERE bookings.id = :id_booking AND user_id = :user_id"""),
                            {"id_booking":id_booking,"user_id":user.id})
     result = res.mappings().first()
     if not result:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="Not found")
+    return result
+
+async def get_booking_by_id_admin(id_booking,db:AsyncSession):
+    res = await db.execute(text("""SELECT * FROM bookings WHERE bookings.id =:id_booking"""),
+                           {"id_booking":id_booking})
+    result = res.mappings().first()
+    if not result:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="Not found")
     return result
 
 @router.get("/booking/{id_booking}",response_model=BookingResponse)

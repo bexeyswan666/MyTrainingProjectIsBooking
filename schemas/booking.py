@@ -6,35 +6,15 @@ from pydantic import EmailStr
 
 class BookingResponse(BaseModel):
     id:int
-    room_id:int
+    status:str
     date_from:date
     date_to:date
-    
-class BookingCreate(BaseModel):
-    user_name:str = Field(min_length = 2 , max_length = 50)
     room_name:str
-    date: date
-    status:str = Field(default = "pinding")
-
-class BookingPut(BaseModel):
-    user_name:str  
-    room_name:str 
-    date:date
-    status:str
-
-class BookingPatch(BaseModel):
-    hotel_name:str | None = None
-    #user_name:str | None = None
-    #room_name:str | None = None
-    #date:date | None = None
-    #status:str | None = None
-
-class SearchByFilter:
-    def __init__(self,owner: str | None = None , hotel_name:str | None = None):
-        self.owner = owner
-        self.hotel_name = hotel_name
-
-
+    hotel_name:str
+    city:str
+    username:str|None=None
+    email:EmailStr|None=None
+    
 class OptionsStatus(str,Enum):
     pending = "pending"
     confirmed = "confirmed"
@@ -56,9 +36,6 @@ class Token(BaseModel):
 class TokenData(BaseModel):
     username:str
     
-
-class BookingCreateHostel(BaseModel):
-    hotel_name:str
 
 class UserResponse(BaseModel):
     username:str
