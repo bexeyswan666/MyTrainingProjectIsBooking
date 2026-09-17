@@ -1,6 +1,7 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.pool import NullPool
 
 class Setting(BaseSettings):
     DB_USER:str
@@ -19,7 +20,7 @@ class Setting(BaseSettings):
 
 setting = Setting()
 
-engine = create_async_engine(setting.DATABASE_URL(),echo = True)
+engine = create_async_engine(setting.DATABASE_URL(),echo = True,poolclass=NullPool)
 
 async_session = async_sessionmaker(
     bind=engine,
